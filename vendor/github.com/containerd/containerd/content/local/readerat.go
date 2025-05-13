@@ -17,12 +17,11 @@
 package local
 
 import (
+	"fmt"
 	"os"
 
-	"github.com/pkg/errors"
-
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/errdefs"
 )
 
 // readerat implements io.ReaderAt in a completely stateless manner by opening
@@ -40,7 +39,7 @@ func OpenReader(p string) (content.ReaderAt, error) {
 			return nil, err
 		}
 
-		return nil, errors.Wrap(errdefs.ErrNotFound, "blob not found")
+		return nil, fmt.Errorf("blob not found: %w", errdefs.ErrNotFound)
 	}
 
 	fp, err := os.Open(p)
@@ -49,7 +48,7 @@ func OpenReader(p string) (content.ReaderAt, error) {
 			return nil, err
 		}
 
-		return nil, errors.Wrap(errdefs.ErrNotFound, "blob not found")
+		return nil, fmt.Errorf("blob not found: %w", errdefs.ErrNotFound)
 	}
 
 	return sizeReaderAt{size: fi.Size(), fp: fp}, nil

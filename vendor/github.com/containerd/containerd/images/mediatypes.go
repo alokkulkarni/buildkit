@@ -18,12 +18,12 @@ package images
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/errdefs"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 )
 
 // mediatype definitions for image components handled in containerd.
@@ -76,7 +76,7 @@ func DiffCompression(ctx context.Context, mediaType string) (string, error) {
 			return "", nil
 		}
 		return "gzip", nil
-	case ocispec.MediaTypeImageLayer, ocispec.MediaTypeImageLayerNonDistributable:
+	case ocispec.MediaTypeImageLayer, ocispec.MediaTypeImageLayerNonDistributable: //nolint:staticcheck // Non-distributable layers are deprecated
 		if len(ext) > 0 {
 			switch ext[len(ext)-1] {
 			case "gzip":
@@ -87,7 +87,7 @@ func DiffCompression(ctx context.Context, mediaType string) (string, error) {
 		}
 		return "", nil
 	default:
-		return "", errors.Wrapf(errdefs.ErrNotImplemented, "unrecognised mediatype %s", mediaType)
+		return "", fmt.Errorf("unrecognised mediatype %s: %w", mediaType, errdefs.ErrNotImplemented)
 	}
 }
 

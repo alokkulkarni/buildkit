@@ -14,9 +14,6 @@
 
 // Package resource provides detecting and representing resources.
 //
-// This package is currently in a Release Candidate phase. Backwards incompatible changes
-// may be introduced prior to v1.0.0, but we believe the current API is ready to stabilize.
-//
 // The fundamental struct is a Resource which holds identifying information
 // about the entities for which telemetry is exported.
 //
@@ -28,4 +25,7 @@
 // OTEL_RESOURCE_ATTRIBUTES the FromEnv Detector can be used. It will interpret
 // the value as a list of comma delimited key/value pairs
 // (e.g. `<key1>=<value1>,<key2>=<value2>,...`).
+//
+// While this package provides a stable API,
+// the attributes added by resource detectors may change.
 package resource // import "go.opentelemetry.io/otel/sdk/resource"

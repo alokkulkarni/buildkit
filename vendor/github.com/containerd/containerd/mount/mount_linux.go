@@ -17,15 +17,15 @@
 package mount
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"strings"
 	"time"
 
-	"github.com/containerd/containerd/sys"
-	"github.com/pkg/errors"
+	"github.com/containerd/containerd/pkg/userns"
+	exec "golang.org/x/sys/execabs"
 	"golang.org/x/sys/unix"
 )
 
@@ -64,7 +64,7 @@ func (m *Mount) Mount(target string) (err error) {
 
 	flags, data, losetup := parseMountOptions(options)
 	if len(data) > pagesize {
-		return errors.Errorf("mount options is too long")
+		return errors.New("mount options is too long")
 	}
 
 	// propagation types.
@@ -105,10 +105,54 @@ func (m *Mount) Mount(target string) (err error) {
 
 	const broflags = unix.MS_BIND | unix.MS_RDONLY
 	if oflags&broflags == broflags {
+		// Preserve CL_UNPRIVILEGED "locked" flags of the
+		// bind mount target when we remount to make the bind readonly.
+		// This is necessary to ensure that
+		// bind-mounting "with options" will not fail with user namespaces, due to
+		// kernel restrictions that require user namespace mounts to preserve
+		// CL_UNPRIVILEGED locked flags.
+		var unprivFlags int
+		if userns.RunningInUserNS() {
+			unprivFlags, err = getUnprivilegedMountFlags(target)
+			if err != nil {
+				return err
+			}
+		}
 		// Remount the bind to apply read only.
-		return unix.Mount("", target, "", uintptr(oflags|unix.MS_REMOUNT), "")
+		return unix.Mount("", target, "", uintptr(oflags|unprivFlags|unix.MS_REMOUNT), "")
 	}
 	return nil
+}
+
+// Get the set of mount flags that are set on the mount that contains the given
+// path and are locked by CL_UNPRIVILEGED.
+//
+// From https://github.com/moby/moby/blob/v23.0.1/daemon/oci_linux.go#L430-L460
+func getUnprivilegedMountFlags(path string) (int, error) {
+	var statfs unix.Statfs_t
+	if err := unix.Statfs(path, &statfs); err != nil {
+		return 0, err
+	}
+
+	// The set of keys come from https://github.com/torvalds/linux/blob/v4.13/fs/namespace.c#L1034-L1048.
+	unprivilegedFlags := []int{
+		unix.MS_RDONLY,
+		unix.MS_NODEV,
+		unix.MS_NOEXEC,
+		unix.MS_NOSUID,
+		unix.MS_NOATIME,
+		unix.MS_RELATIME,
+		unix.MS_NODIRATIME,
+	}
+
+	var flags int
+	for flag := range unprivilegedFlags {
+		if int(statfs.Flags)&flag == flag {
+			flags |= flag
+		}
+	}
+
+	return flags, nil
 }
 
 // Unmount the provided mount path with the flags
@@ -164,7 +208,7 @@ func unmount(target string, flags int) error {
 		}
 		return nil
 	}
-	return errors.Wrapf(unix.EBUSY, "failed to unmount target %s", target)
+	return fmt.Errorf("failed to unmount target %s: %w", target, unix.EBUSY)
 }
 
 // UnmountAll repeatedly unmounts the given mount point until there
@@ -366,19 +410,22 @@ func mountAt(chdir string, source, target, fstype string, flags uintptr, data st
 
 	f, err := os.Open(chdir)
 	if err != nil {
-		return errors.Wrap(err, "failed to mountat")
+		return fmt.Errorf("failed to mountat: %w", err)
 	}
 	defer f.Close()
 
 	fs, err := f.Stat()
 	if err != nil {
-		return errors.Wrap(err, "failed to mountat")
+		return fmt.Errorf("failed to mountat: %w", err)
 	}
 
 	if !fs.IsDir() {
-		return errors.Wrap(errors.Errorf("%s is not dir", chdir), "failed to mountat")
+		return fmt.Errorf("failed to mountat: %s is not dir", chdir)
 	}
-	return errors.Wrap(sys.FMountat(f.Fd(), source, target, fstype, flags, data), "failed to mountat")
+	if err := fMountat(f.Fd(), source, target, fstype, flags, data); err != nil {
+		return fmt.Errorf("failed to mountat: %w", err)
+	}
+	return nil
 }
 
 func (m *Mount) mountWithHelper(helperBinary, typePrefix, target string) error {
@@ -407,7 +454,7 @@ func (m *Mount) mountWithHelper(helperBinary, typePrefix, target string) error {
 			return nil
 		}
 		if !errors.Is(err, unix.ECHILD) {
-			return errors.Wrapf(err, "mount helper [%s %v] failed: %q", helperBinary, args, string(out))
+			return fmt.Errorf("mount helper [%s %v] failed: %q: %w", helperBinary, args, string(out), err)
 		}
 		// We got ECHILD, we are not sure whether the mount was successful.
 		// If the mount ID has changed, we are sure we got some new mount, but still not sure it is fully completed.
@@ -420,5 +467,5 @@ func (m *Mount) mountWithHelper(helperBinary, typePrefix, target string) error {
 			_ = unmount(target, 0)
 		}
 	}
-	return errors.Errorf("mount helper [%s %v] failed with ECHILD (retired %d times)", helperBinary, args, retriesOnECHILD)
+	return fmt.Errorf("mount helper [%s %v] failed with ECHILD (retired %d times)", helperBinary, args, retriesOnECHILD)
 }
