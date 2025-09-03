@@ -40,8 +40,10 @@ const (
 // their proprietary information.
 type TraceContext struct{}
 
-var _ TextMapPropagator = TraceContext{}
-var traceCtxRegExp = regexp.MustCompile("^(?P<version>[0-9a-f]{2})-(?P<traceID>[a-f0-9]{32})-(?P<spanID>[a-f0-9]{16})-(?P<traceFlags>[a-f0-9]{2})(?:-.*)?$")
+var (
+	_              TextMapPropagator = TraceContext{}
+	traceCtxRegExp                   = regexp.MustCompile("^(?P<version>[0-9a-f]{2})-(?P<traceID>[a-f0-9]{32})-(?P<spanID>[a-f0-9]{16})-(?P<traceFlags>[a-f0-9]{2})(?:-.*)?$")
+)
 
 // Inject set tracecontext from the Context into the carrier.
 func (tc TraceContext) Inject(ctx context.Context, carrier TextMapCarrier) {
@@ -50,7 +52,9 @@ func (tc TraceContext) Inject(ctx context.Context, carrier TextMapCarrier) {
 		return
 	}
 
-	carrier.Set(tracestateHeader, sc.TraceState().String())
+	if ts := sc.TraceState().String(); ts != "" {
+		carrier.Set(tracestateHeader, ts)
+	}
 
 	// Clear all flags other than the trace-context supported sampling bit.
 	flags := sc.TraceFlags() & trace.FlagsSampled

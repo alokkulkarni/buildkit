@@ -15,10 +15,7 @@
 /*
 Package codes defines the canonical error codes used by OpenTelemetry.
 
-This package is currently in a Release Candidate phase. Backwards incompatible changes
-may be introduced prior to v1.0.0, but we believe the current API is ready to stabilize.
-
 It conforms to [the OpenTelemetry
-specification](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#statuscanonicalcode).
+specification](https://github.com/open-telemetry/opentelemetry-specification/blob/v1.20.0/specification/trace/api.md#set-status).
 */
 package codes // import "go.opentelemetry.io/otel/codes"

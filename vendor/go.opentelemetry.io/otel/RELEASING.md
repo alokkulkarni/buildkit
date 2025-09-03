@@ -2,54 +2,57 @@
 
 ## Semantic Convention Generation
 
-If a new version of the OpenTelemetry Specification has been released it will be necessary to generate a new
-semantic convention package from the YAML definitions in the specification repository. There is a utility in
-`internal/tools/semconv-gen` that can be used to generate the a package with the name matching the specification
-version number under the `semconv` package. This will ideally be done soon after the specification release is
-tagged. Make sure that the specification repo contains a checkout of the the latest tagged release so that the
-generated files match the released semantic conventions.
+New versions of the [OpenTelemetry Semantic Conventions] mean new versions of the `semconv` package need to be generated.
+The `semconv-generate` make target is used for this.
 
-There are currently two categories of semantic conventions that must be generated, `resource` and `trace`.
+1. Checkout a local copy of the [OpenTelemetry Semantic Conventions] to the desired release tag.
+2. Pull the latest `otel/semconvgen` image: `docker pull otel/semconvgen:latest`
+3. Run the `make semconv-generate ...` target from this repository.
 
+For example,
+
+```sh
+export TAG="v1.21.0" # Change to the release version you are generating.
+export OTEL_SEMCONV_REPO="/absolute/path/to/opentelemetry/semantic-conventions"
+docker pull otel/semconvgen:latest
+make semconv-generate # Uses the exported TAG and OTEL_SEMCONV_REPO.
 ```
-cd internal/tools/semconv-gen
-go run generator.go -i /path/to/specification/repo/semantic_conventions/resource
-go run generator.go -i /path/to/specification/repo/semantic_conventions/trace
-```
 
-Using default values for all options other than `input` will result in using the `template.j2` template to
-generate `resource.go` and `trace.go` in `/path/to/otelgo/repo/semconv/<version>`.
+This should create a new sub-package of [`semconv`](./semconv).
+Ensure things look correct before submitting a pull request to include the addition.
 
-There are several ancillary files that are not generated and should be copied into the new package from the
-prior package, with updates made as appropriate to canonical import path statements and constant values.
-These files include:
+## Breaking changes validation
 
-* doc.go
-* exception.go
-* http(_test)?.go
-* schema.go
+You can run `make gorelease` that runs [gorelease](https://pkg.go.dev/golang.org/x/exp/cmd/gorelease) to ensure that there are no unwanted changes done in the public API.
 
-Uses of the previous schema version in this repository should be updated to use the newly generated version.
-No tooling for this exists at present, so use find/replace in your editor of choice or craft a `grep | sed`
-pipeline if you like living on the edge.
+You can check/report problems with `gorelease` [here](https://golang.org/issues/26420).
 
 ## Pre-Release
 
+First, decide which module sets will be released and update their versions
+in `versions.yaml`.  Commit this change to a new branch.
+
 Update go.mod for submodules to depend on the new release which will happen in the next step.
 
-1. Run the pre-release script. It creates a branch `pre_release_<new tag>` that will contain all release changes.
+1. Run the `prerelease` make target. It creates a branch
+    `prerelease_<module set>_<new tag>` that will contain all release changes.
 
     ```
-    ./pre_release.sh -t <new tag>
+    make prerelease MODSET=<module set>
     ```
 
 2. Verify the changes.
 
     ```
-    git diff main
+    git diff ...prerelease_<module set>_<new tag>
     ```
 
     This should have changed the version for all modules to be `<new tag>`.
+    If these changes look correct, merge them into your pre-release branch:
+
+    ```go
+    git merge prerelease_<module set>_<new tag>
+    ```
 
 3. Update the [Changelog](./CHANGELOG.md).
    - Make sure all relevant changes for this release are included and are in language that non-contributors to the project can understand.
@@ -70,17 +73,22 @@ Update go.mod for submodules to depend on the new release which will happen in t
 Once the Pull Request with all the version changes has been approved and merged it is time to tag the merged commit.
 
 ***IMPORTANT***: It is critical you use the same tag that you used in the Pre-Release step!
-Failure to do so will leave things in a broken state.
+Failure to do so will leave things in a broken state. As long as you do not
+change `versions.yaml` between pre-release and this step, things should be fine.
 
 ***IMPORTANT***: [There is currently no way to remove an incorrectly tagged version of a Go module](https://github.com/golang/go/issues/34189).
 It is critical you make sure the version you push upstream is correct.
 [Failure to do so will lead to minor emergencies and tough to work around](https://github.com/open-telemetry/opentelemetry-go/issues/331).
 
-1. Run the tag.sh script using the `<commit-hash>` of the commit on the main branch for the merged Pull Request.
+1. For each module set that will be released, run the `add-tags` make target
+    using the `<commit-hash>` of the commit on the main branch for the merged Pull Request.
 
     ```
-    ./tag.sh <new tag> <commit-hash>
+    make add-tags MODSET=<module set> COMMIT=<commit hash>
     ```
+
+    It should only be necessary to provide an explicit `COMMIT` value if the
+    current `HEAD` of your working directory is not the correct commit.
 
 2. Push tags to the upstream remote (not your fork: `github.com/open-telemetry/opentelemetry-go.git`).
     Make sure you push all sub-modules as well.
@@ -95,7 +103,6 @@ It is critical you make sure the version you push upstream is correct.
 
 Finally create a Release for the new `<new tag>` on GitHub.
 The release body should include all the release notes from the Changelog for this release.
-Additionally, the `tag.sh` script generates commit logs since last release which can be used to supplement the release notes.
 
 ## Verify Examples
 
@@ -116,5 +123,17 @@ Once verified be sure to [make a release for the `contrib` repository](https://g
 
 ### Website Documentation
 
-Update [the documentation](./website_docs) for [the OpenTelemetry website](https://opentelemetry.io/docs/go/).
+Update the [Go instrumentation documentation] in the OpenTelemetry website under [content/en/docs/instrumentation/go].
 Importantly, bump any package versions referenced to be the latest one you just released and ensure all code examples still compile and are accurate.
+
+[OpenTelemetry Semantic Conventions]: https://github.com/open-telemetry/semantic-conventions
+[Go instrumentation documentation]: https://opentelemetry.io/docs/instrumentation/go/
+[content/en/docs/instrumentation/go]: https://github.com/open-telemetry/opentelemetry.io/tree/main/content/en/docs/instrumentation/go
+
+### Demo Repository
+
+Bump the dependencies in the following Go services:
+
+- [`accountingservice`](https://github.com/open-telemetry/opentelemetry-demo/tree/main/src/accountingservice)
+- [`checkoutservice`](https://github.com/open-telemetry/opentelemetry-demo/tree/main/src/checkoutservice)
+- [`productcatalogservice`](https://github.com/open-telemetry/opentelemetry-demo/tree/main/src/productcatalogservice)

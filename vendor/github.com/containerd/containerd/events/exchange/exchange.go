@@ -18,19 +18,19 @@ package exchange
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/filters"
 	"github.com/containerd/containerd/identifiers"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/namespaces"
+	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/typeurl"
 	goevents "github.com/docker/go-events"
 	"github.com/gogo/protobuf/types"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -69,7 +69,7 @@ func (e *Exchange) Forward(ctx context.Context, envelope *events.Envelope) (err 
 		if err != nil {
 			logger.WithError(err).Error("error forwarding event")
 		} else {
-			logger.Debug("event forwarded")
+			logger.Trace("event forwarded")
 		}
 	}()
 
@@ -88,10 +88,10 @@ func (e *Exchange) Publish(ctx context.Context, topic string, event events.Event
 
 	namespace, err = namespaces.NamespaceRequired(ctx)
 	if err != nil {
-		return errors.Wrapf(err, "failed publishing event")
+		return fmt.Errorf("failed publishing event: %w", err)
 	}
 	if err := validateTopic(topic); err != nil {
-		return errors.Wrapf(err, "envelope topic %q", topic)
+		return fmt.Errorf("envelope topic %q: %w", topic, err)
 	}
 
 	encoded, err = typeurl.MarshalAny(event)
@@ -114,7 +114,7 @@ func (e *Exchange) Publish(ctx context.Context, topic string, event events.Event
 		if err != nil {
 			logger.WithError(err).Error("error publishing event")
 		} else {
-			logger.Debug("event published")
+			logger.Trace("event published")
 		}
 	}()
 
@@ -150,7 +150,7 @@ func (e *Exchange) Subscribe(ctx context.Context, fs ...string) (ch <-chan *even
 	if len(fs) > 0 {
 		filter, err := filters.ParseAll(fs...)
 		if err != nil {
-			errq <- errors.Wrapf(err, "failed parsing subscription filters")
+			errq <- fmt.Errorf("failed parsing subscription filters: %w", err)
 			closeAll()
 			return
 		}
@@ -175,7 +175,7 @@ func (e *Exchange) Subscribe(ctx context.Context, fs ...string) (ch <-chan *even
 					// TODO(stevvooe): For the most part, we are well protected
 					// from this condition. Both Forward and Publish protect
 					// from this.
-					err = errors.Errorf("invalid envelope encountered %#v; please file a bug", ev)
+					err = fmt.Errorf("invalid envelope encountered %#v; please file a bug", ev)
 					break
 				}
 
@@ -203,21 +203,21 @@ func (e *Exchange) Subscribe(ctx context.Context, fs ...string) (ch <-chan *even
 
 func validateTopic(topic string) error {
 	if topic == "" {
-		return errors.Wrap(errdefs.ErrInvalidArgument, "must not be empty")
+		return fmt.Errorf("must not be empty: %w", errdefs.ErrInvalidArgument)
 	}
 
 	if topic[0] != '/' {
-		return errors.Wrapf(errdefs.ErrInvalidArgument, "must start with '/'")
+		return fmt.Errorf("must start with '/': %w", errdefs.ErrInvalidArgument)
 	}
 
 	if len(topic) == 1 {
-		return errors.Wrapf(errdefs.ErrInvalidArgument, "must have at least one component")
+		return fmt.Errorf("must have at least one component: %w", errdefs.ErrInvalidArgument)
 	}
 
 	components := strings.Split(topic[1:], "/")
 	for _, component := range components {
 		if err := identifiers.Validate(component); err != nil {
-			return errors.Wrapf(err, "failed validation on component %q", component)
+			return fmt.Errorf("failed validation on component %q: %w", component, err)
 		}
 	}
 
@@ -226,15 +226,15 @@ func validateTopic(topic string) error {
 
 func validateEnvelope(envelope *events.Envelope) error {
 	if err := identifiers.Validate(envelope.Namespace); err != nil {
-		return errors.Wrapf(err, "event envelope has invalid namespace")
+		return fmt.Errorf("event envelope has invalid namespace: %w", err)
 	}
 
 	if err := validateTopic(envelope.Topic); err != nil {
-		return errors.Wrapf(err, "envelope topic %q", envelope.Topic)
+		return fmt.Errorf("envelope topic %q: %w", envelope.Topic, err)
 	}
 
 	if envelope.Timestamp.IsZero() {
-		return errors.Wrapf(errdefs.ErrInvalidArgument, "timestamp must be set on forwarded event")
+		return fmt.Errorf("timestamp must be set on forwarded event: %w", errdefs.ErrInvalidArgument)
 	}
 
 	return nil
